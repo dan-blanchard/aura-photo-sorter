@@ -1,0 +1,6 @@
+__pycache__/
+.DS_Store
+# Never commit these: they identify people or log in to Aura.
+*.npz
+aura-login.json
+config.json

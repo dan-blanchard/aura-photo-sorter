@@ -1,0 +1,11 @@
+{
+  "album": "Frame photos",
+  "frames": [
+    {"name": "Family", "id": "<frame id>", "orientation": "landscape"},
+    {"name": "Alex's frame", "id": "<frame id>", "orientation": "portrait", "people": ["Alex"]},
+    {"name": "Sam's frame", "id": "<frame id>", "orientation": "portrait", "people": ["Sam"]}
+  ],
+  "ha_url": "http://homeassistant.local:8123",
+  "notify": "mobile_app_my_phone",
+  "ha_ssh": "root@homeassistant.local"
+}
