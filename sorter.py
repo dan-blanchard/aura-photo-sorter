@@ -32,6 +32,7 @@ import json
 import logging
 import os
 import random
+import re
 import secrets
 import shutil
 import subprocess
@@ -73,7 +74,8 @@ MAX_ATTEMPTS = 3
 # From the 2026-11-01 dry run on the 366 photos then on the frames.
 SURE, MARGIN, UNSURE = 0.35, 0.05, 0.25
 MIN_FACE, MIN_DETECTION = 0.025, 0.6
-SAME_IMAGE = 4.0  # Burst shots a second apart differ by about 6 on the same signature.
+SAME_IMAGE = 4.0
+BAR_PIXELS = 4  # Aura's crop padding; about 1 px is rounding, real bars were over 100.  # Burst shots a second apart differ by about 6 on the same signature.
 LIBRARY_MATCH = 8.0
 
 # The Aura app's own upload bucket and Cognito pool, as in github.com/zmanowar/auraframes.
@@ -493,15 +495,48 @@ def helper(*args):
     return out.stdout
 
 
-def check_aura_crop(asset_id, frame, login):
-    """Aura's crop is what the frame shows for a portrait, so say if one didn't appear."""
-    listing = aura("GET", f"/frames/{frame}/assets.json?side_load_users=false&limit=1000", login)
-    asset = next((a for a in listing["assets"] if a["id"] == asset_id), None)
-    if asset and asset["width"] >= asset["height"]:
+_screens = {}
+
+
+def screen(frame_id, login):
+    """The frame's screen shape from Aura, as (orientation, width, height), e.g.
+    ("portrait", 3, 4) for a Walden hung tall. None if Aura doesn't say."""
+    if frame_id not in _screens:
+        for f in aura("GET", "/frames.json", login).get("frames", []):
+            m = re.fullmatch(r"(landscape|portrait)_(\d+)_(\d+)", f.get("display_aspect_ratio") or "")
+            _screens[f["id"]] = (m[1], int(m[2]), int(m[3])) if m else None
+    return _screens.get(frame_id)
+
+
+def check_aura_crop(asset_id, frame_id, login):
+    """A photo that isn't the screen's shape is shown through Aura's crop of it, which Aura works
+    out by itself shortly after an upload. Warn if that crop still leaves black bars.
+
+    Each photo has a crop per screen shape: landscape_rect and portrait_rect (user_* when
+    someone picked one in the app), with *_url_padding giving the bars left over, in pixels.
+    Shapes other than 4:3 have their own, e.g. portrait_4_5. A photo with no crop at all
+    still filled the screen on every frame checked, so that is only noted. Checked against
+    every photo on four frames, where it flagged exactly the one that showed bars.
+    """
+    shape = screen(frame_id, login)
+    if shape is None:
         return
-    padding = (asset or {}).get("landscape_url_padding") or {}
-    if asset is None or not asset.get("landscape_rect") or max(padding.values(), default=0) > 1:
-        log.warning("%s has no landscape crop from Aura yet", asset_id[:8])
+    orientation, w, h = shape
+    listing = aura("GET", f"/frames/{frame_id}/assets.json?side_load_users=false&limit=1000", login)
+    asset = next((a for a in listing["assets"] if a["id"] == asset_id), None)
+    if asset is None:
+        log.warning("%s isn't on the frame's list yet, so its crop can't be checked", asset_id[:8])
+        return
+    if abs(asset["width"] / asset["height"] - w / h) < 0.01:
+        return  # Already the screen's shape.
+    name = orientation if (w, h) in ((4, 3), (3, 4)) else f"{orientation}_{w}_{h}"
+    rects = [asset.get(f"user_{name}_rect"), asset.get(f"{name}_rect"), asset.get(f"auto_{name}_rect")]
+    padding = asset.get(f"{name}_url_padding") or {}
+    if not any(rects):
+        log.info("%s has no %s crop from Aura yet", asset_id[:8], orientation)
+    elif max(padding.values(), default=0) > BAR_PIXELS:
+        log.warning("%s still shows with bars on %s frames; pick a tighter crop in the Aura app",
+                    asset_id[:8], orientation)
 
 
 def send(photo_id, entry, login):
@@ -531,8 +566,7 @@ def send(photo_id, entry, login):
             # Rapid adds can race a frame's refresh and leave it short, and Aura's crop arrived
             # about 13 s after an upload in testing.
             time.sleep(30)
-            if entry.get("orientation") == "portrait" and frame.get("orientation") == "landscape":
-                check_aura_crop(entry["asset"], frame["id"], login)
+            check_aura_crop(entry["asset"], frame["id"], login)
             log.info("%s added to %s", photo_id[:8], name)
         done.append(name)
     if not entry["frames"]:

@@ -139,6 +139,8 @@ uv run --script sorter.py try photo.jpg
 - Log: `~/Library/Logs/aura-photo-sorter/sorter.log`. It's quiet when nothing happens.
 - Alive check: `last-album-read` in the sorter's folder updates every 5 minutes.
 - Stop it: `launchctl bootout gui/$(id -u)/local.aura-photo-sorter`
+- A photo that isn't the frame's shape is shown through a crop Aura works out by itself. If
+  that crop still leaves black bars, the log says so; pick a tighter crop in the Aura app.
 - If your Aura login expires, the sorter pauses, tells you, and loses nothing. Run `login.py`
   again.
 - A photo added to the album twice is uploaded once, and you get one notification naming the
